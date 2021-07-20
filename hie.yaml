@@ -1,0 +1,6 @@
+cradle:
+  stack:
+  - path: "./src"
+    component: "docx:lib"
+  - path: "./app"
+    component: "docx:exe:docx-example"

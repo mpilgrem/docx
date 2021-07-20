@@ -1,0 +1,51 @@
+name:                docx
+version:             0.1.0.0
+github:              "mpilgrem/docx"
+license:             BSD3
+author:              "Mike Pilgrem"
+maintainer:          "public@pilgrem.com"
+copyright:           "Copyright 2021 Mike Pilgrem"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Test
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Haskell representation, and writer, of simple Office Open
+                     XML Wordpressing documents
+
+dependencies:
+- base >= 4.7 && < 5
+- array
+- bytestring
+- colour
+- extra
+- generic-deriving
+- mtl
+- time
+- unordered-containers
+- xml
+- zip-archive
+
+ghc-options:
+- -Wall
+
+library:
+  source-dirs: src
+
+executables:
+  docx-example:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - docx
