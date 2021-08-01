@@ -100,10 +100,10 @@ defaultSectionProps = SectionProps
   , sPrEnPrNumFmt       = Nothing
   }
 
-defaultSectionMarginals :: Array (Marginal, MarginalType) (Maybe Int)
+defaultSectionMarginals :: Array (Marginal, MarginalType) [Block']
 defaultSectionMarginals =
   array ((minBound, minBound), (maxBound, maxBound))
-        [((m, mt), Nothing) | m <- [minBound .. maxBound]
+        [((m, mt), []) | m <- [minBound .. maxBound]
                             , mt <- [minBound .. maxBound]
                             ]
 

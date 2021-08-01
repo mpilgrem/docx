@@ -17,14 +17,18 @@ module Text.Docx.Utilities
 
 import Text.Docx.Types
 
+-- |Yields the twip (twentieth of a point) equivalent (rounded) of centimetres.
 cmToTwip :: Double -> Twip
 cmToTwip cm = round (cm * 72.0 * 20.0 / 2.54)
 
+-- |Yields the twip (twentieth of a point) equivalent (rounded) of points.
 ptToTwip :: Double -> Twip
 ptToTwip pt = round (pt * 20.0)
 
-ptToHalfPt :: Double -> Int
+-- |Yields the half-point equivalent (rounded) of points.
+ptToHalfPt :: Double -> HalfPt
 ptToHalfPt pt = round (pt * 2.0)
 
+-- |Yields the toggle setting equivalent of a boolean value.
 toggle :: Bool -> Toggle
 toggle = pure

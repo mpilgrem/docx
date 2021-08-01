@@ -27,6 +27,7 @@ module Text.Docx.Types
   , Tab
   , TabStyle (..)
   , RunProps (..)
+  , HalfPt
   , Toggle
   , Fonts (..)
   , Section (..)
@@ -58,11 +59,10 @@ module Text.Docx.Types
   , CellProps (..)
   , CellBorders (..)
   , CellBorder (..)
-  , Headers
-  , Footers
+  , EighthPt
   , Marginal (..)
   , MarginalType (..)
-  , FootnoteType (..)
+  , NoteType (..)
   ) where
 
 import Data.Array.IArray (Array)
@@ -80,8 +80,6 @@ data Docx = Docx
   { docxProps    :: DocProps
   , docxStyles   :: Styles
   , docxSections :: [Section]
-  , docxHeaders  :: Headers
-  , docxFooters  :: Footers
   } deriving (Eq, Show)
 
 -- |Representation of document properties.
@@ -206,7 +204,7 @@ data Section = Section SectionProps [Block]
 data SectionProps = SectionProps
   { sPrPgSz       :: PageSize
   , sPrPgMar      :: PageMargins
-  , sPrMarginals  :: Array (Marginal, MarginalType) (Maybe Int)
+  , sPrMarginals  :: Array (Marginal, MarginalType) [Block']
   , sPrFnPrNumFmt :: Maybe NumberFormat
   , sPrEnPrNumFmt :: Maybe NumberFormat
   } deriving (Eq, Show)
@@ -271,8 +269,8 @@ data ParaProps = ParaProps
 
 -- |Representation of paragraph spacings.
 data Spacing = Spacing
-  { spacingBefore :: Maybe Int
-  , spacingAfter  :: Maybe Int
+  { spacingBefore :: Maybe Twip
+  , spacingAfter  :: Maybe Twip
   , spacingLine   :: Maybe (LineRule, Int)
   } deriving (Eq, Show)
 
@@ -370,9 +368,12 @@ data RunProps = RunProps
   , rPrIsShadow    :: Toggle
   , rPrColor       :: Last (RGB Word8)
   , rPrRFonts      :: Last Fonts
-  , rPrSz          :: Last Int  -- In half points
+  , rPrSz          :: Last HalfPt
   , rPrVertAlign   :: Last VertAlign
   } deriving (Eq, Generic, Show)
+
+-- |Synonym representing halves of a point
+type HalfPt = Int
 
 instance Semigroup RunProps where
 
@@ -471,7 +472,7 @@ data Cell' = Cell' CellProps [Block'] deriving (Eq, Show)
 
 -- |Representation of table cells properties.
 data CellProps = CellProps
-  { tcPrTcW       :: Int
+  { tcPrTcW       :: Twip
   , tcPrTcBorders :: Maybe CellBorders
   } deriving (Eq, Show)
 
@@ -485,19 +486,15 @@ data CellBorders = CellBorders
 
 -- |Represention of cell borders.
 newtype CellBorder = CellBorder
-  { tcBorderSz :: Int
+  { tcBorderSz :: EighthPt
   } deriving (Eq, Show)
 
--- |Synonym representing collections of header contents, referenced by unique
--- integers.
-type Headers = HashMap Int [Block']
+-- |Synonym representing eighths of a point.
+type EighthPt = Int
 
--- |Synonym representing collections of footer contents, referenced by unique
--- integers.
-type Footers = HashMap Int [Block']
-
-data FootnoteType
-  = NormalFootnote
+-- |Representation of footnote or endnote types.
+data NoteType
+  = NormalNote
   | Separator
   | ContinuationSeparator
   deriving (Eq, Show)

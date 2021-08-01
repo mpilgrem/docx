@@ -16,7 +16,7 @@ module Text.Docx.Writer
 
 import Data.Array.IArray (Array, assocs)
 import Data.List (foldl', mapAccumL)
-import Data.Maybe (fromJust, fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe, maybeToList)
 import Data.Monoid (First (..), Last (..))
 import Data.Word (Word8)
 import Numeric (showHex)
@@ -26,8 +26,7 @@ import Codec.Archive.Zip (Archive, Entry, addEntryToArchive, emptyArchive,
 import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (State, gets, modify, runState)
 import qualified Data.ByteString.Lazy.Char8 as BS
-import Data.HashMap.Strict (HashMap, toList)
-import qualified Data.HashMap.Strict as HM (elems, lookup)
+import Data.HashMap.Lazy (toList)
 import Data.Time.Clock.System (SystemTime (systemSeconds), getSystemTime)
 import Text.XML.Light
     ( unqual,
@@ -54,18 +53,25 @@ writeDocx fp d = do
 --------------------------------------------------------------------------------
 
 data OtherParts = OtherParts
-  { opFootnoteNo :: Int
-  , opFootnotes  :: [(Int, [Block'])]
-  , opEndnoteNo  :: Int
-  , opEndnotes   :: [(Int, [Block'])]
+  { opFootnoteNo     :: Int
+  , opFootnotes      :: [(Int, [Block'])]
+  , opEndnoteNo      :: Int
+  , opEndnotes       :: [(Int, [Block'])]
+  , opHeaderFooterNo :: Int
+  , opHeaders        :: [(Int, [Block'])]
+  , opFooters        :: [(Int, [Block'])]
   } deriving (Eq, Show)
 
 emptyOtherParts :: OtherParts
 emptyOtherParts = OtherParts
-  { opFootnoteNo = 1  -- Items 0 and 1 used for separators.
-  , opFootnotes  = []
-  , opEndnoteNo  = 1  -- Items 0 and 1 used for separators.
-  , opEndnotes   = []
+  { opFootnoteNo     = 1  -- Items 0 and 1 used for separators.
+  , opFootnotes      = []
+  , opEndnoteNo      = 1  -- Items 0 and 1 used for separators.
+  , opEndnotes       = []
+  , opHeaderFooterNo = 4  -- Items 1 to 4 used for styles, settings, footnotes
+                          -- and endnotes.
+  , opHeaders        = []
+  , opFooters        = []
   }
 
 -- |Create an archive from an Office Open XML Wordprocessing document, given a
@@ -73,26 +79,24 @@ emptyOtherParts = OtherParts
 docx :: Docx -> SystemTime -> Archive
 docx d sysTime = foldl' (flip addEntryToArchive) emptyArchive entries
  where
-  (hRefCount, hRefs) = mapAccumL tagHeaderId (0 :: Int) (docxHeaders d)
-  tagHeaderId n blocks = (n + 1, (hId (n + 1), blocks))
-  hId n = "rId" <> show (n + 4)
-  (fRefCount, fRefs) = mapAccumL tagFooterId 0 (docxFooters d)
-  tagFooterId n blocks = (n + 1, (fId (n + 1), blocks))
-  fId n = "rId" <> show (n + hRefCount + 4)
   sysTime' = toInteger $ systemSeconds sysTime
-  (documentEntry', otherParts) = documentEntry hRefs fRefs d sysTime'
+  (documentEntry', otherParts) = documentEntry d sysTime'
   footnotes = opFootnotes otherParts
   hasFootnotes = not $ null footnotes
   endnotes = opEndnotes otherParts
   hasEndnotes = not $ null endnotes
+  headers = opHeaders otherParts
+  hRefCount = length headers
+  footers = opFooters otherParts
+  fRefCount = length footers
   entries = map (\f -> f sysTime') (
     [ contentTypesEntry hRefCount fRefCount hasFootnotes hasEndnotes
     , relsEntry
-    , documentXmlRelsEntry hRefs fRefs hasFootnotes hasEndnotes
+    , documentXmlRelsEntry headers footers hasFootnotes hasEndnotes
     , stylesEntry d
     , settingsEntry (docxProps d) hasFootnotes hasEndnotes
     ] <>
-    concatMap (uncurry marginalEntries) [ (Header, hRefs), (Footer, fRefs) ]) <>
+    concatMap (uncurry marginalEntries) [ (Header, headers), (Footer, footers) ]) <>
     maybeToList (footnotesEntry (opFootnotes otherParts) sysTime') <>
     maybeToList (endnotesEntry (opEndnotes otherParts) sysTime') <>
     [documentEntry']
@@ -117,16 +121,16 @@ relsEntry sysTime = toEntry
   (BS.pack $ ppTopElement rels)
 
 -- |Create the _rels/document.xml.rels entry
-documentXmlRelsEntry :: HashMap a (String, [Block'])
-                     -> HashMap b (String, [Block'])
+documentXmlRelsEntry :: [(Int, [Block'])]
+                     -> [(Int, [Block'])]
                      -> Bool
                      -> Bool
                      -> Integer -> Entry
-documentXmlRelsEntry hRefs fRefs hasFootnotes hasEndnotes sysTime = toEntry
+documentXmlRelsEntry headers footers hasFootnotes hasEndnotes sysTime = toEntry
   "_rels/document.xml.rels"
   sysTime
   (BS.pack $ ppTopElement $
-     documentXmlRels hRefs fRefs hasFootnotes hasEndnotes)
+     documentXmlRels headers footers hasFootnotes hasEndnotes)
 
 -- |Create the settings.xml entry
 settingsEntry :: DocProps
@@ -147,29 +151,27 @@ stylesEntry d sysTime = toEntry
 
 -- |Create the document.xml entry. NB Microsoft Word for Microsoft 365 will put
 -- this in folder \word.
-documentEntry :: HashMap Int (String, a)
-              -> HashMap Int (String, a)
-              -> Docx -> Integer -> (Entry, OtherParts)
-documentEntry hRefs fRefs d sysTime =
-  let (documentElement, otherParts) = documentXml hRefs fRefs d
+documentEntry :: Docx -> Integer -> (Entry, OtherParts)
+documentEntry d sysTime =
+  let (documentElement, otherParts) = documentXml d
       documentByteString = BS.pack $ ppTopElement documentElement
   in  (toEntry "document.xml" sysTime documentByteString, otherParts)
 
 -- |Representation of types of note
-data NoteType
+data Note
   = FootNote
   | EndNote
   deriving (Eq, Show)
 
-noteType :: NoteType -> String
+noteType :: Note -> String
 noteType nt = case nt of
   FootNote -> "footnote"
   EndNote  -> "endnote"
 
-noteTypes :: NoteType -> String
+noteTypes :: Note -> String
 noteTypes nt = noteType nt <> "s"
 
-noteTypeXml :: NoteType -> FilePath
+noteTypeXml :: Note -> FilePath
 noteTypeXml nt = noteTypes nt <> ".xml"
 
 -- |Create the footnotes.xml entry.
@@ -181,7 +183,7 @@ endnotesEntry :: [(Int, [Block'])] -> Integer -> Maybe Entry
 endnotesEntry = notesEntry EndNote
 
 -- |Create the footnotes.xml or endnotes.xml entry.
-notesEntry :: NoteType -> [(Int, [Block'])] -> Integer -> Maybe Entry
+notesEntry :: Note -> [(Int, [Block'])] -> Integer -> Maybe Entry
 notesEntry _ [] _ = Nothing
 notesEntry nt ns sysTime =
   Just $ toEntry (noteTypeXml nt) sysTime $ BS.pack $ ppTopElement notesElement
@@ -203,24 +205,24 @@ notesEntry nt ns sysTime =
    where
     p' = p $ fromParaProps mStyle props : refR : fromRuns' runs
 
-separator :: NoteType -> Content
+separator :: Note -> Content
 separator nt = note' nt 0 Separator
   [ p [ r [ wElem "separator" () ] ] ]
 
-continuationSeparator :: NoteType -> Content
+continuationSeparator :: Note -> Content
 continuationSeparator nt = note' nt 1 ContinuationSeparator
   [ p [ r [ wElem "continuationSeparator" () ] ] ]
 
-note' :: NoteType -> Int -> FootnoteType -> [Content] -> Content
+note' :: Note -> Int -> NoteType -> [Content] -> Content
 note' nt ref fnType cs =
   wElem (noteType nt) ( wAttr "type" fnType' <> [wIdAttr ref], cs )
  where
   fnType' = case fnType of
-    NormalFootnote        -> "normal"
+    NormalNote        -> "normal"
     Separator             -> "separator"
     ContinuationSeparator -> "continuationSeparator"
 
-noteRef :: NoteType -> [Content]
+noteRef :: Note -> [Content]
 noteRef nt = case nt of
   FootNote -> footnoteRef
   EndNote  -> endnoteRef
@@ -238,8 +240,8 @@ endnoteRef =
   ]
 
 -- |Create the header[1..n].xml or footer[1..n].xml entries.
-marginalEntries :: Marginal -> HashMap a (b, [Block']) -> [Integer -> Entry]
-marginalEntries marginal refs = HM.elems $ snd $ mapAccumL marginalEntry 1 refs
+marginalEntries :: Marginal -> [(a, [Block'])] -> [Integer -> Entry]
+marginalEntries marginal marginals = snd $ mapAccumL marginalEntry 1 marginals
  where
   marginalEntry :: Int -> (a, [Block']) -> (Int, Integer -> Entry)
   marginalEntry n (_, blocks) = (n + 1, \st -> toEntry
@@ -251,7 +253,6 @@ marginalEntries marginal refs = HM.elems $ snd $ mapAccumL marginalEntry 1 refs
       let cs = map fromBlock' blocks
       in  node (wName marginalName') ([xmlnsW], cs)
     marginalName' = case marginal of Header -> "hdr"; Footer -> "ftr"
-
 
 marginalName :: Marginal -> String
 marginalName marginal = case marginal of
@@ -311,12 +312,12 @@ rels = fromMaybe undefined $ parseXMLDoc $
   "</Relationships>"
 
 -- |Create document.xml.rels XML
-documentXmlRels :: HashMap a (String, [Block'])
-                -> HashMap b (String, [Block'])
+documentXmlRels :: [(Int, [Block'])]
+                -> [(Int, [Block'])]
                 -> Bool
                 -> Bool
                 -> Element
-documentXmlRels hRefs fRefs hasFootnotes hasEndnotes =
+documentXmlRels headers footers hasFootnotes hasEndnotes =
   node (unqual "Relationships") ([relsAttr],
     [ relationship
         "rId1"
@@ -337,30 +338,30 @@ documentXmlRels hRefs fRefs hasFootnotes hasEndnotes =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes"
         "endnotes.xml"
     | hasEndnotes ] <>
-    fromHeaderRefs hRefs <>
-    fromFooterRefs fRefs)
+    fromHeaders headers <>
+    fromFooters footers)
 
-fromHeaderRefs :: HashMap a (String, [Block']) -> [Content]
-fromHeaderRefs hRefs = snd $ mapAccumL fromHeaderRef 0 hRefs'
- where
-  hRefs' = HM.elems hRefs
+fromHeaders :: [(Int, a)] -> [Content]
+fromHeaders headers = snd $ mapAccumL fromHeader 0 headers
 
-fromHeaderRef:: Int -> (String, a) -> (Int, Content)
-fromHeaderRef n (relId, _) = (n + 1, relationship
-  relId
+fromHeader:: Int -> (Int, a) -> (Int, Content)
+fromHeader n (relId, _) = (n+1, relationship
+  relId'
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
   (runningMarginalXml Header (n + 1)))
-
-fromFooterRefs :: HashMap a (String, [Block']) -> [Content]
-fromFooterRefs fRefs = snd $ mapAccumL fromFooterRef 0 fRefs'
  where
-  fRefs' = HM.elems fRefs
+  relId' = "rId" <> show relId
 
-fromFooterRef:: Int -> (String, a) -> (Int, Content)
-fromFooterRef n (relId, _) = (n + 1, relationship
-  relId
+fromFooters :: [(Int, a)] -> [Content]
+fromFooters footers = snd $ mapAccumL fromFooter 0 footers
+
+fromFooter:: Int -> (Int, a) -> (Int, Content)
+fromFooter n (relId, _) = (n + 1, relationship
+  relId'
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
   (runningMarginalXml Footer (n + 1)))
+ where
+  relId' = "rId" <> show relId
 
 relsAttr :: Attr
 relsAttr = Attr (unqual "xmlns")
@@ -474,7 +475,7 @@ specialFootnotes = specialNotes FootNote
 specialEndnotes :: [Content]
 specialEndnotes = specialNotes EndNote
 
-specialNotes :: NoteType -> [Content]
+specialNotes :: Note -> [Content]
 specialNotes nt =
   [ wElem (noteType nt) (wIdAttr "0")
   , wElem (noteType nt) (wIdAttr "1")
@@ -628,12 +629,10 @@ runStyle styleName mStyleName mRprops isD isQf =
 --------------------------------------------------------------------------------
 
 -- |Helper function to create minimal document.xml XML.
-documentXml :: HashMap Int (String, a)
-            -> HashMap Int (String, a)
-            -> Docx
+documentXml :: Docx
             -> (Element, OtherParts)
-documentXml hRefs fRefs d = runState (do
-  c <- section hRefs fRefs $ docxSections d
+documentXml d = runState (do
+  c <- section $ docxSections d
   document [body c]) emptyOtherParts
 
 document :: [Content] -> State OtherParts Element
@@ -642,66 +641,69 @@ document cs = pure $ node (wName "document") ([xmlnsW, xmlnsR], cs)
 body :: [Content] -> Content
 body = wElem "body"
 
-section :: HashMap Int (String, a)
-        -> HashMap Int (String, a)
-        -> [Section]
-        -> State OtherParts [Content]
-section _ _ [] = pure []
-section hRefs fRefs [Section sp bs] = contents hRefs fRefs True sp bs
-section hRefs fRefs ((Section sp bs):ss) = do
-  cs <- contents hRefs fRefs False sp bs
-  cs' <- section hRefs fRefs ss
+section :: [Section] -> State OtherParts [Content]
+section [] = pure []
+section [Section sp bs] = contents True sp bs
+section ((Section sp bs):ss) = do
+  cs <- contents False sp bs
+  cs' <- section ss
   pure $ cs <> cs'
 
-contents :: HashMap Int (String, a)
-         -> HashMap Int (String, a)
-         -> Bool
+contents :: Bool
          -> SectionProps
          -> [Block]
          -> State OtherParts [Content]
-contents hRefs fRefs True sp [] = pure [fromSectionProps hRefs fRefs sp]
-contents _ _ False _ [] = undefined
-contents hRefs fRefs False sp [block] = fromBlockWSp hRefs fRefs sp block
-contents hRefs fRefs isLastSection sp (block:bs) = do
+contents True sp [] = fromSectionProps sp
+contents False _ [] = undefined
+contents False sp [block] = fromBlockWSp sp block
+contents isLastSection sp (block:bs) = do
   cs <- fromBlock block
-  cs' <- contents hRefs fRefs isLastSection sp bs
+  cs' <- contents isLastSection sp bs
   pure $ cs <> cs'
 
-fromSectionProps :: HashMap Int (String, a)
-                 -> HashMap Int (String, a)
-                 -> SectionProps
-                 -> Content
-fromSectionProps hRefs fRefs sp = sectPr $
-  [ pgSz $ sPrPgSz sp
-  , pgMar $ sPrPgMar sp ] <>
-  map (marginalRef hRefs fRefs) (maybeAssocs $ sPrMarginals sp) <>
-  maybe [] (pure . footnotePr . pure .fromNumberFormat) (sPrFnPrNumFmt sp) <>
-  maybe [] (pure . endnotePr . pure . fromNumberFormat) (sPrEnPrNumFmt sp)
+fromSectionProps :: SectionProps
+                 -> State OtherParts [Content]
+fromSectionProps sp = do
+  cs <- concatMapM marginalRef (maybeAssocs $ sPrMarginals sp)
+  pure $ pure $ sectPr $
+    [ pgSz $ sPrPgSz sp
+    , pgMar $ sPrPgMar sp ] <>
+    cs <>
+    maybe [] (pure . footnotePr . pure .fromNumberFormat) (sPrFnPrNumFmt sp) <>
+    maybe [] (pure . endnotePr . pure . fromNumberFormat) (sPrEnPrNumFmt sp)
 
-marginalRef :: HashMap Int (String, a)
-            -> HashMap Int (String, a)
-            -> (Marginal, MarginalType, Int)
-            -> Content
-marginalRef hRefs fRefs (m, mt, ref) = wElem refName $
-  [ Attr (QName "id" Nothing (Just "r")) ref' ] <>
-  wAttr "type" refType
+marginalRef :: (Marginal, MarginalType, [Block'])
+            -> State OtherParts [Content]
+marginalRef (_, _, []) = pure []
+marginalRef (m, mt, blocks) = do
+  headerFooterNo <- gets opHeaderFooterNo
+  marginals <- gets (case m of Header -> opHeaders; Footer -> opFooters)
+  let headerFooterNo' = headerFooterNo + 1
+      marginals' = (headerFooterNo', blocks) : marginals
+      ref' = "rId" <> show headerFooterNo'
+  modify (case m of
+        Header -> \s -> s { opHeaderFooterNo = headerFooterNo'
+                     , opHeaders = marginals' }
+        Footer -> \s -> s { opHeaderFooterNo = headerFooterNo'
+                     , opFooters = marginals' })
+  pure $ pure $ wElem refName $
+    [ Attr (QName "id" Nothing (Just "r")) ref' ] <>
+    wAttr "type" refType
  where
   refName = case m of Header -> "headerReference"; Footer -> "footerReference"
-  refs = case m of Header -> hRefs; Footer -> fRefs
-  ref' = fst $ fromJust $ HM.lookup ref refs
   refType = case mt of
               DefaultMarginal -> "default"
               FirstMarginal   -> "first"
               EvenMarginal    -> "even"
 
-maybeAssocs :: Array (Marginal, MarginalType) (Maybe Int)
-            -> [(Marginal, MarginalType, Int)]
-maybeAssocs a = mapMaybe maybeAssocs' (assocs a)
+maybeAssocs :: Array (Marginal, MarginalType) [Block']
+            -> [(Marginal, MarginalType, [Block'])]
+maybeAssocs a = concatMap maybeAssocs' (assocs a)
 
-maybeAssocs' :: ((Marginal, MarginalType), Maybe Int)
-             -> Maybe (Marginal, MarginalType, Int)
-maybeAssocs' (_, Nothing) = Nothing
-maybeAssocs' ((m, mt), Just i) = Just (m, mt, i)
+maybeAssocs' :: ((Marginal, MarginalType), [Block'])
+             -> [(Marginal, MarginalType, [Block'])]
+maybeAssocs' (_, []) = []
+maybeAssocs' ((m, mt), blocks) = [(m, mt, blocks)]
 
 sectPr :: [Content] -> Content
 sectPr = wElem "sectPr"
@@ -719,21 +721,19 @@ pgMar (PageMargins to bo tm bm lm rm h f g) = wElem "pgMar" $
   wAttr "footer" f <>
   wAttr "gutter" g
 
-fromBlockWSp :: HashMap Int (String, a)
-             -> HashMap Int (String, a)
-             -> SectionProps
+fromBlockWSp :: SectionProps
              -> Block
              -> State OtherParts [Content]
-fromBlockWSp hRefs fRefs sp block = case block of
+fromBlockWSp sp block = case block of
   Paragraph mStyle props runs -> do
-    c <- fromParagraphWSp hRefs fRefs sp mStyle props runs
+    c <- fromParagraphWSp sp mStyle props runs
     pure [c]
   Table props tGrid rows -> do
     c <- fromTable props tGrid rows
     c' <- emptyPara
     pure $ c : [c']
  where
-  emptyPara = fromParagraphWSp hRefs fRefs sp Nothing defaultParaProps []
+  emptyPara = fromParagraphWSp sp Nothing defaultParaProps []
 
 fromBlock :: Block -> State OtherParts [Content]
 fromBlock block = case block of
@@ -753,16 +753,15 @@ fromBlock' block = case block of
 -- Paragraph blocks
 --------------------------------------------------------------------------------
 
-fromParagraphWSp :: HashMap Int (String, a)
-                 -> HashMap Int (String, a)
-                 -> SectionProps
+fromParagraphWSp :: SectionProps
                  -> Maybe String
                  -> ParaProps
                  -> [Run]
                  -> State OtherParts Content
-fromParagraphWSp hRefs fRefs sp mStyle props runs = do
+fromParagraphWSp sp mStyle props runs = do
   cs <- fromRuns runs
-  pure $ p $ fromParaPropsWSp hRefs fRefs sp mStyle props : cs
+  cs' <- fromParaPropsWSp sp mStyle props
+  pure $ p $ cs' : cs
 
 fromParagraph :: Maybe String -> ParaProps -> [Run] -> State OtherParts Content
 fromParagraph mStyle props runs = do
@@ -776,16 +775,16 @@ fromParagraph' mStyle props runs =
 p :: [Content] -> Content
 p = wElem "p"
 
-fromParaPropsWSp :: HashMap Int (String, a)
-              -> HashMap Int (String, a)
-              -> SectionProps
-              -> Maybe String
-              -> ParaProps
-              -> Content
-fromParaPropsWSp hRefs fRefs sp mStyle props = pPr $
-  fromSectionProps hRefs fRefs sp :
-  maybe [] (pure . pStyle) mStyle <>
-  fromParaProps'' props
+fromParaPropsWSp :: SectionProps
+                 -> Maybe String
+                 -> ParaProps
+                 -> State OtherParts Content
+fromParaPropsWSp sp mStyle props = do
+  cs <- fromSectionProps sp
+  pure $ pPr $
+    cs <>
+    maybe [] (pure . pStyle) mStyle <>
+    fromParaProps'' props
 
 fromParaProps :: Maybe String
               -> ParaProps
@@ -1099,7 +1098,7 @@ fromTableProps tProps = tblPr $
 tblPr :: [Content] -> Content
 tblPr = wElem "tblPr"
 
-tblW :: Int -> [Content]
+tblW :: Twip -> [Content]
 tblW w = pure $ wElem "tblW" $ wAttr "w" w <> wAttr "type" "dxa"
 
 tblLayout :: TableLayout -> [Content]
@@ -1120,19 +1119,19 @@ fromTblCellMar cms = pure $ tblCellMar $
 tblCellMar :: [Content] -> Content
 tblCellMar = wElem "tblCellMar"
 
-topMargin :: Int -> [Content]
+topMargin :: Twip -> [Content]
 topMargin = cellMargin "top"
 
-bottomMargin :: Int -> [Content]
+bottomMargin :: Twip -> [Content]
 bottomMargin = cellMargin "bottom"
 
-startMargin :: Int -> [Content]
+startMargin :: Twip -> [Content]
 startMargin = cellMargin "start"
 
-endMargin :: Int -> [Content]
+endMargin :: Twip -> [Content]
 endMargin = cellMargin "end"
 
-cellMargin :: String -> Int -> [Content]
+cellMargin :: String -> Twip -> [Content]
 cellMargin n w = pure $ wElem n $ wAttr "w" w <> wAttr "type" "dxa"
 
 fromTableGrid :: TableGrid -> Content
@@ -1144,7 +1143,7 @@ tblGrid = wElem "tblGrid"
 fromGridCol :: GridCol -> Content
 fromGridCol = gridCol
 
-gridCol :: Int -> Content
+gridCol :: Twip -> Content
 gridCol w = wElem "gridCol" $ wAttr "w" w
 
 tr :: [Content] -> Content
@@ -1187,7 +1186,7 @@ tc = wElem "tc"
 tcPr :: [Content] -> Content
 tcPr = wElem "tcPr"
 
-tcW :: Int -> Content
+tcW :: Twip -> Content
 tcW w = wElem "tcW" $ wAttr "w" w <> wAttr "type" "dxa"
 
 fromCellBorders :: CellBorders -> [Content]
@@ -1200,17 +1199,17 @@ fromCellBorders cbs = pure $ tcBorders $
 tcBorders :: [Content] -> Content
 tcBorders = wElem "tcBorders"
 
-top :: Int -> [Content]
+top :: EighthPt -> [Content]
 top = cellBorder "top"
 
-bottom :: Int -> [Content]
+bottom :: EighthPt -> [Content]
 bottom = cellBorder "bottom"
 
-left :: Int -> [Content]
+left :: EighthPt -> [Content]
 left = cellBorder "left"
 
-right :: Int -> [Content]
+right :: EighthPt -> [Content]
 right = cellBorder "right"
 
-cellBorder :: String -> Int -> [Content]
+cellBorder :: String -> EighthPt -> [Content]
 cellBorder n s = pure $ wElem n $ wAttr "sz" s <> [ wValAttr "single" ]

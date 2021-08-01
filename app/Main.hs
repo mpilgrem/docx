@@ -18,7 +18,7 @@ main :: IO ()
 main = writeDocx "example.docx" example
 
 example :: Docx
-example = Docx dProps styles sections headers footers
+example = Docx dProps styles sections
  where
   dProps = qtrCmDefaultTabStop $ defaultDocProps
             { dPrEnPrNumFmt = Just CardinalText
@@ -97,7 +97,13 @@ example = Docx dProps styles sections headers footers
     ]
   s1props = addNoteNumFmt $ defaultSectionProps
     { sPrMarginals = defaultSectionMarginals //
-        [ ((Header, DefaultMarginal), Just 1) ]
+        [ ( (Header, DefaultMarginal)
+          , [ Paragraph' (Just "Header") (ParaProps Nothing Nothing Nothing [])
+                [ Run' Nothing mempty
+                    [ RunText "example.docx example" ]
+                ]
+            ]
+          ) ]
     }
   section2 = Section s2props
     [ Paragraph (Just "Body Text") (ParaProps Nothing Nothing Nothing [])
@@ -118,13 +124,3 @@ example = Docx dProps styles sections headers footers
     { sPrFnPrNumFmt = Just CardinalText
     , sPrEnPrNumFmt = Just Decimal
     }
-  headers = HM.fromList
-    [ ( 1
-      , [ Paragraph' (Just "Header") (ParaProps Nothing Nothing Nothing [])
-            [ Run' Nothing mempty
-                [ RunText "example.docx example" ]
-            ]
-        ]
-      )
-    ]
-  footers = mempty
