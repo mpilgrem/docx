@@ -9,17 +9,25 @@ Maintainer  : public@pilgrem.com
 Stability   : experimental
 Portability : POSIX, Windows
 
-Types representing an Office Open XML document in the Wordprocessing category.
+The type representing an Office Open XML document in the Wordprocessing category
+('Docx') and related types.
 -}
 module Text.Docx.Types
   ( Docx (..)
   , DocProps (..)
   , NumberFormat (..)
   , Twip
+  , NumDefs (..)
+  , AbstractNum (..)
+  , AbstractNumProps (..)
+  , NumLevel (..)
+  , Numbering (..)
+  , NumberingProps (..)
   , Styles (..)
   , StyleName
   , Style (..)
   , ParaProps (..)
+  , NumProps (..)
   , Justification (..)
   , Spacing (..)
   , LineRule (..)
@@ -78,8 +86,14 @@ import Generics.Deriving.Semigroup (gsappenddefault)
 -- |Representation of Office Open XML Wordprocessing documents.
 data Docx = Docx
   { docxProps    :: DocProps
+    -- ^ Document-wide properties.
+  , docxNumDefs :: NumDefs
+    -- ^ Automatic numbering definitions that can be referenced in the
+    -- document's sections.
   , docxStyles   :: Styles
+    -- ^ Styles that can be referenced in the document's sections.
   , docxSections :: [Section]
+    -- ^ The series of sections of the document.
   } deriving (Eq, Show)
 
 -- |Representation of document properties.
@@ -166,6 +180,34 @@ data NumberFormat
 -- |Synonym representing measurments in twip (20th of a point, 1,440th of an
 -- inch).
 type Twip = Int
+
+-- |Representation of automatic numbering definitions.
+data NumDefs = NumDefs [AbstractNum] [Numbering]
+             deriving (Eq, Show)
+
+data AbstractNum = AbstractNum AbstractNumProps [NumLevel]
+                 deriving (Eq, Show)
+
+data AbstractNumProps = AbstractNumProps
+  { anPrAbstractNumId :: Int
+  , anPrName          :: String
+  } deriving (Eq, Show)
+
+data NumLevel = NumLevel
+  { nlIlvl    :: Int
+  , nlNumFmt  :: Maybe NumberFormat
+  , nlLvlText :: Maybe String
+  , nlPPr     :: Maybe ParaProps
+  , nlRPr     :: Maybe RunProps
+  } deriving (Eq, Show)
+
+data Numbering = Numbering NumberingProps [NumLevel]
+               deriving (Eq, Show)
+
+data NumberingProps = NumberingProps
+  { nPrNumId         :: Int
+  , nPrAbstractNumId :: Int
+  } deriving (Eq, Show)
 
 -- |Representation of Style Definitions parts of an Office Open XML document
 -- in the Wordprocessing category.
@@ -261,10 +303,16 @@ data Block'
 
 -- |Representation of a paragraph's properties.
 data ParaProps = ParaProps
-  { pPrSpacing :: Maybe Spacing
-  , pPrJc      :: Maybe Justification
-  , pPrInd     :: Maybe Indentation
+  { pPrNumPr   :: Maybe NumProps
   , pPrTabs    :: [Tab]
+  , pPrSpacing :: Maybe Spacing
+  , pPrInd     :: Maybe Indentation
+  , pPrJc      :: Maybe Justification
+  } deriving (Eq, Show)
+
+data NumProps = NumProps
+  { numPrIlvl  :: Maybe Int
+  , numPrNumId :: Maybe Int
   } deriving (Eq, Show)
 
 -- |Representation of paragraph spacings.

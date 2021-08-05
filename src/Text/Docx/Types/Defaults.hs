@@ -12,6 +12,7 @@ Default values for types representing Office Open XML Wordpressing documents.
 module Text.Docx.Types.Defaults
   ( defaultDocProps
   , qtrCmDefaultTabStop
+  , defaultNumDefs
   , normalStyle
   , footnoteTextStyle
   , endnoteTextStyle
@@ -48,6 +49,9 @@ defaultDocProps       = DocProps
 qtrCmDefaultTabStop :: DocProps -> DocProps
 qtrCmDefaultTabStop props = props
   { dPrDefaultTabStop = Just $ cmToTwip 0.25 }
+
+defaultNumDefs :: NumDefs
+defaultNumDefs = NumDefs [] []
 
 normalStyle :: (StyleName, Style)
 normalStyle = ("Normal", ParaStyle
@@ -125,10 +129,12 @@ defaultPageMargins = PageMargins
 
 defaultParaProps :: ParaProps
 defaultParaProps = ParaProps
-  { pPrSpacing = Just defaultSpacing
-  , pPrJc      = Nothing
-  , pPrInd     = Nothing
+  { pPrNumPr = Nothing
   , pPrTabs = []
+  , pPrSpacing = Just defaultSpacing
+  , pPrInd     = Nothing
+  , pPrJc      = Nothing
+
   }
 
 defaultSpacing :: Spacing

@@ -4,10 +4,12 @@ import Data.Array.IArray ((//))
 import qualified Data.HashMap.Strict as HM (fromList)
 import Data.Maybe (fromJust)
 
-import Text.Docx (Block (..), Block' (..), DocProps (..), Docx (..),
-  Marginal (..), MarginalType (..), NumberFormat (..), ParaProps (..), Run (..),
-  Run' (..), RunContent (..), Section (..), SectionProps (..), Spacing (..),
-  Style(..), Styles(..), ptToTwip, writeDocx)
+import Text.Docx (AbstractNum (..), AbstractNumProps (..), Block (..),
+  Block' (..), DocProps (..), Docx (..), Marginal (..), MarginalType (..),
+  NumberFormat (..), Numbering (..), NumberingProps (..), NumDefs (..),
+  NumLevel (..), NumProps (..), ParaProps (..), Run (..), Run' (..),
+  RunContent (..), Section (..), SectionProps (..), Spacing (..), Style(..),
+  Styles(..), ptToTwip, writeDocx)
 
 import Text.Docx.Types.Defaults (bold, defaultDocProps, defaultParaProps,
   defaultSectionMarginals, defaultSectionProps, endnoteReferenceStyle,
@@ -18,7 +20,7 @@ main :: IO ()
 main = writeDocx "example.docx" example
 
 example :: Docx
-example = Docx dProps styles sections
+example = Docx dProps numDefs styles sections
  where
   dProps = qtrCmDefaultTabStop $ defaultDocProps
             { dPrEnPrNumFmt = Just CardinalText
@@ -30,6 +32,23 @@ example = Docx dProps styles sections
             -- by Word for Microsoft 365 (16.0.14131.20278). So, the
             -- corresponding section property is also set in this example.
             }
+  numDefs = NumDefs abstractNums numberings
+  abstractNums =
+    [ AbstractNum (AbstractNumProps 1 "AbNum1") numLevels
+
+    ]
+  numLevels =
+    [ NumLevel
+        { nlIlvl = 0
+        , nlNumFmt = Just Decimal
+        , nlLvlText = Just "%1"
+        , nlPPr = Nothing
+        , nlRPr = Nothing
+        }
+    ]
+  numberings =
+    [ Numbering (NumberingProps 1 1) []
+    ]
   styles = Styles
     { stylesPPrDefault = Just defaultParaProps
     , stylesRPrDefault = Nothing
@@ -64,41 +83,42 @@ example = Docx dProps styles sections
         )
   sections = [section1, section2]
   section1 = Section s1props
-    [ Paragraph (Just "Body Text") (ParaProps Nothing Nothing Nothing [])
+    [ Paragraph (Just "Body Text") (ParaProps np [] Nothing Nothing Nothing)
         [ Run Nothing mempty
             [ RunText $ "This is an example .docx document. The footnotes " <>
                       "are numbered using 'cardinal text', which is an " <>
                       "option that cannot be selected in Microsoft Word." ]
         , Footnote (Just "Footnote Reference") mempty
-            [ Paragraph' (Just "Footnote Text") (ParaProps Nothing Nothing Nothing [])
+            [ Paragraph' (Just "Footnote Text") (ParaProps Nothing [] Nothing Nothing Nothing)
                 [ Run' Nothing mempty
                     [ RunText " This is a footnote."]
                 ]
             ]
         ]
-   , Paragraph (Just "Body Text") (ParaProps Nothing Nothing Nothing [])
+   , Paragraph (Just "Body Text") (ParaProps np [] Nothing Nothing Nothing)
         [ Run Nothing bold
             [ RunText "This is an example .docx document (bold)." ]
         , Footnote (Just "Footnote Reference") mempty
-            [ Paragraph' (Just "Footnote Text") (ParaProps Nothing Nothing Nothing [])
+            [ Paragraph' (Just "Footnote Text") (ParaProps Nothing [] Nothing Nothing Nothing)
                 [ Run' Nothing mempty
                     [ RunText " This is a second footnote." ]
                 ]
             ]
         ]
-   , Paragraph (Just "Body Text") (ParaProps Nothing Nothing Nothing [])
+   , Paragraph (Just "Body Text") (ParaProps np [] Nothing Nothing Nothing)
         [ Run Nothing italic
             [ RunText "This is an example .docx document (italic)." ]
         ]
-   , Paragraph (Just "Body Text") (ParaProps Nothing Nothing Nothing [])
+   , Paragraph (Just "Body Text") (ParaProps np [] Nothing Nothing Nothing)
         [ Run Nothing (bold <> italic)
             [ RunText "This is an example .docx document (bold and italic)." ]
         ]
     ]
+  np = Just $ NumProps (Just 0) (Just 1)
   s1props = addNoteNumFmt $ defaultSectionProps
     { sPrMarginals = defaultSectionMarginals //
         [ ( (Header, DefaultMarginal)
-          , [ Paragraph' (Just "Header") (ParaProps Nothing Nothing Nothing [])
+          , [ Paragraph' (Just "Header") (ParaProps Nothing [] Nothing Nothing Nothing)
                 [ Run' Nothing mempty
                     [ RunText "example.docx example" ]
                 ]
@@ -106,12 +126,12 @@ example = Docx dProps styles sections
           ) ]
     }
   section2 = Section s2props
-    [ Paragraph (Just "Body Text") (ParaProps Nothing Nothing Nothing [])
+    [ Paragraph (Just "Body Text") (ParaProps Nothing [] Nothing Nothing Nothing)
         [ Run Nothing mempty
             [ RunText $ "This is a second section of the document. The " <>
                       "endnotes are numbered using 'decimal'." ]
         , Endnote (Just "Endnote Reference") mempty
-            [ Paragraph' (Just "Endnote Text") (ParaProps Nothing Nothing Nothing [])
+            [ Paragraph' (Just "Endnote Text") (ParaProps Nothing [] Nothing Nothing Nothing)
                 [ Run' Nothing mempty
                     [ RunText " This is an endnote." ]
                 ]

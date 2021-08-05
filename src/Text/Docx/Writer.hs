@@ -68,8 +68,8 @@ emptyOtherParts = OtherParts
   , opFootnotes      = []
   , opEndnoteNo      = 1  -- Items 0 and 1 used for separators.
   , opEndnotes       = []
-  , opHeaderFooterNo = 4  -- Items 1 to 4 used for styles, settings, footnotes
-                          -- and endnotes.
+  , opHeaderFooterNo = 5  -- Items 1 to 5 used for styles, settings, footnotes,
+                          -- endnotes and numbering.
   , opHeaders        = []
   , opFooters        = []
   }
@@ -81,6 +81,7 @@ docx d sysTime = foldl' (flip addEntryToArchive) emptyArchive entries
  where
   sysTime' = toInteger $ systemSeconds sysTime
   (documentEntry', otherParts) = documentEntry d sysTime'
+  hasNumbering = case d of Docx _ (NumDefs [] _) _ _ -> False; _ -> True
   footnotes = opFootnotes otherParts
   hasFootnotes = not $ null footnotes
   endnotes = opEndnotes otherParts
@@ -90,12 +91,15 @@ docx d sysTime = foldl' (flip addEntryToArchive) emptyArchive entries
   footers = opFooters otherParts
   fRefCount = length footers
   entries = map (\f -> f sysTime') (
-    [ contentTypesEntry hRefCount fRefCount hasFootnotes hasEndnotes
+    [ contentTypesEntry hasNumbering hRefCount fRefCount
+                        hasFootnotes hasEndnotes
+
     , relsEntry
-    , documentXmlRelsEntry headers footers hasFootnotes hasEndnotes
+    , documentXmlRelsEntry hasNumbering headers footers hasFootnotes hasEndnotes
     , stylesEntry d
     , settingsEntry (docxProps d) hasFootnotes hasEndnotes
     ] <>
+    [ numberingEntry d | hasNumbering ] <>
     concatMap (uncurry marginalEntries) [ (Header, headers), (Footer, footers) ]) <>
     maybeToList (footnotesEntry (opFootnotes otherParts) sysTime') <>
     maybeToList (endnotesEntry (opEndnotes otherParts) sysTime') <>
@@ -106,12 +110,13 @@ docx d sysTime = foldl' (flip addEntryToArchive) emptyArchive entries
 --------------------------------------------------------------------------------
 
 -- |Create the [Content_Types].xml entry
-contentTypesEntry :: Int -> Int -> Bool -> Bool -> Integer -> Entry
-contentTypesEntry hRefCount fRefCount hasFootnotes hasEndnotes sysTime =
+contentTypesEntry :: Bool -> Int -> Int -> Bool -> Bool -> Integer -> Entry
+contentTypesEntry hasNumbering hRefCount fRefCount hasFootnotes hasEndnotes sysTime =
   toEntry "[Content_Types].xml"
           sysTime
           (BS.pack $ ppTopElement $
-             contentTypes hRefCount fRefCount hasFootnotes hasEndnotes)
+             contentTypes hasNumbering hRefCount fRefCount
+                                       hasFootnotes hasEndnotes)
 
 -- |Create the _rels/.rels entry
 relsEntry :: Integer -> Entry
@@ -121,16 +126,18 @@ relsEntry sysTime = toEntry
   (BS.pack $ ppTopElement rels)
 
 -- |Create the _rels/document.xml.rels entry
-documentXmlRelsEntry :: [(Int, [Block'])]
+documentXmlRelsEntry :: Bool
+                     -> [(Int, [Block'])]
                      -> [(Int, [Block'])]
                      -> Bool
                      -> Bool
                      -> Integer -> Entry
-documentXmlRelsEntry headers footers hasFootnotes hasEndnotes sysTime = toEntry
-  "_rels/document.xml.rels"
-  sysTime
-  (BS.pack $ ppTopElement $
-     documentXmlRels headers footers hasFootnotes hasEndnotes)
+documentXmlRelsEntry
+  hasNumbering headers footers hasFootnotes hasEndnotes sysTime = toEntry
+    "_rels/document.xml.rels"
+    sysTime
+    (BS.pack $ ppTopElement $
+       documentXmlRels hasNumbering headers footers hasFootnotes hasEndnotes)
 
 -- |Create the settings.xml entry
 settingsEntry :: DocProps
@@ -141,6 +148,13 @@ settingsEntry props hasFootnotes hasEndnotes sysTime = toEntry
   "settings.xml"
   sysTime
   (BS.pack $ ppTopElement $ settingsXml props hasFootnotes hasEndnotes)
+
+-- |Create the numbering.xml entry
+numberingEntry :: Docx -> Integer -> Entry
+numberingEntry (Docx _ numDefs _ _) sysTime = toEntry
+  "numbering.xml"
+  sysTime
+  (BS.pack $ ppTopElement $ numberingXml numDefs)
 
 -- |Create the styles.xml entry
 stylesEntry :: Docx -> Integer -> Entry
@@ -263,8 +277,8 @@ runningMarginalXml :: Marginal -> Int -> String
 runningMarginalXml marginal n = marginalName marginal <> show n <>".xml"
 
 -- |The minimal [Content_Types].xml XML.
-contentTypes :: Int -> Int -> Bool -> Bool -> Element
-contentTypes hRefCount fRefCount hasFootnotes hasEndnotes =
+contentTypes :: Bool -> Int -> Int -> Bool -> Bool -> Element
+contentTypes hasNumbering hRefCount fRefCount hasFootnotes hasEndnotes =
   node (unqual "Types") ([contentTypesAttr],
     [ default' "rels"
                "application/vnd.openxmlformats-package.relationships+xml"
@@ -273,6 +287,7 @@ contentTypes hRefCount fRefCount hasFootnotes hasEndnotes =
     , override "styles.xml" "styles"
     , override "settings.xml" "settings"
     ] <>
+    [ override "numbering.xml" "numbering" | hasNumbering ] <>
     [ override "footnotes.xml" "footnotes" | hasFootnotes ] <>
     [ override "endnotes.xml" "endnotes" | hasEndnotes ] <>
     overrides Header hRefCount <>
@@ -312,34 +327,29 @@ rels = fromMaybe undefined $ parseXMLDoc $
   "</Relationships>"
 
 -- |Create document.xml.rels XML
-documentXmlRels :: [(Int, [Block'])]
+documentXmlRels :: Bool
+                -> [(Int, [Block'])]
                 -> [(Int, [Block'])]
                 -> Bool
                 -> Bool
                 -> Element
-documentXmlRels headers footers hasFootnotes hasEndnotes =
+documentXmlRels hasNumbering headers footers hasFootnotes hasEndnotes =
   node (unqual "Relationships") ([relsAttr],
-    [ relationship
-        "rId1"
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"
-        "styles.xml"
-    , relationship
-        "rId2"
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings"
-        "settings.xml"
+    [ relationship' 1 "styles"
+    , relationship' 2 "settings"
     ] <>
-    [ relationship
-        "rId3"
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
-        "footnotes.xml"
-    | hasFootnotes ] <>
-    [ relationship
-        "rId4"
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes"
-        "endnotes.xml"
-    | hasEndnotes ] <>
+    [ relationship' 3 "footnotes" | hasFootnotes ] <>
+    [ relationship' 4 "endnotes" | hasEndnotes ] <>
+    [ relationship' 5 "numbering" | hasNumbering ] <>
     fromHeaders headers <>
     fromFooters footers)
+ where
+  relationship' :: Int -> String -> Content
+  relationship' n part = relationship
+    ("rId" <> show n)
+    ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/" <>
+      part)
+    (part <> ".xml")
 
 fromHeaders :: [(Int, a)] -> [Content]
 fromHeaders headers = snd $ mapAccumL fromHeader 0 headers
@@ -550,6 +560,62 @@ fromNumberFormat nf = wValElem "numFmt" nf'
     VietnameseCounting           -> "vietnameseCounting"
 
 --------------------------------------------------------------------------------
+-- The numbering part
+--------------------------------------------------------------------------------
+
+numberingXml :: NumDefs -> Element
+numberingXml (NumDefs aNums nums) = numbering $
+  fromAbstractNums aNums <>
+  fromNumberings nums
+
+numbering :: [Content] -> Element
+numbering cs = node (wName "numbering") ([xmlnsW], cs)
+
+fromAbstractNums :: [AbstractNum] -> [Content]
+fromAbstractNums = map fromAbstractNum
+
+fromAbstractNum :: AbstractNum -> Content
+fromAbstractNum (AbstractNum props nLvls) =
+  abstractNum (anPrAbstractNumId props) $
+    fromNumLevels nLvls
+
+abstractNum :: Int -> [Content] -> Content
+abstractNum n cs = wElem "abstractNum" (wAttr "abstractNumId" n, cs)
+
+fromNumLevels :: [NumLevel] -> [Content]
+fromNumLevels = map fromNumLevel
+
+fromNumLevel :: NumLevel -> Content
+fromNumLevel nLvl = lvl (nlIlvl nLvl) $
+  maybe [] (pure . fromNumberFormat) (nlNumFmt nLvl) <>
+  maybe [] (pure . wValElem "lvlText") (nlLvlText nLvl) <>
+  maybe [] fromParaProps' (nlPPr nLvl) <>
+  maybe [] (pure . fromRunProps Nothing) (nlRPr nLvl)
+
+lvl :: Int -> [Content] -> Content
+lvl n cs = wElem "lvl" (wAttr "ilvl" n, cs)
+
+fromNumberings :: [Numbering] -> [Content]
+fromNumberings = map fromNumbering
+
+fromNumbering :: Numbering -> Content
+fromNumbering (Numbering props nLvls) = num (nPrNumId props) $
+  wValElem "abstractNumId" (nPrAbstractNumId props) :
+  fromLvlOverrides nLvls
+
+num :: Int -> [Content] -> Content
+num n cs = wElem "num" (wAttr "numId" n, cs)
+
+fromLvlOverrides :: [NumLevel] -> [Content]
+fromLvlOverrides = map fromLvlOverride
+
+fromLvlOverride :: NumLevel -> Content
+fromLvlOverride nLvl = lvlOverride (nlIlvl nLvl) [fromNumLevel nLvl]
+
+lvlOverride :: Int -> [Content] -> Content
+lvlOverride n cs = wElem "lvlOverride" (wAttr "ilvl" n, cs)
+
+--------------------------------------------------------------------------------
 -- The styles part
 --------------------------------------------------------------------------------
 
@@ -564,7 +630,7 @@ styles cs = node (wName "styles") ([xmlnsW], cs)
 
 docDefaults :: Maybe ParaProps -> Maybe RunProps -> Content
 docDefaults mPprops mRprops = wElem "docDefaults" $
-  maybe [] (\pProps -> [pPrDefault $ fromParaProps'' pProps]) mPprops <>
+  maybe [] (\pProps -> [pPrDefault $ fromParaProps' pProps]) mPprops <>
   maybe [] (\rProps -> [rPrDefault [fromRunProps Nothing rProps]]) mRprops
 
 pPrDefault :: [Content] -> Content
@@ -594,7 +660,7 @@ paragraphStyle styleName mStyleName mPprops mRprops isD isQf =
  where
   cs = name styleName :
        maybe [] (pure . basedOn) mStyleName <>
-       maybe [] (pure . pPr . fromParaProps'') mPprops <>
+       maybe [] (pure . pPr . fromParaProps') mPprops <>
        maybe [] (pure . fromRunProps Nothing) mRprops <>
        [ qFormat | isQf ]
 
@@ -784,14 +850,14 @@ fromParaPropsWSp sp mStyle props = do
   pure $ pPr $
     cs <>
     maybe [] (pure . pStyle) mStyle <>
-    fromParaProps'' props
+    fromParaProps' props
 
 fromParaProps :: Maybe String
               -> ParaProps
               -> Content
 fromParaProps mStyle props = pPr $
   maybe [] (pure . pStyle) mStyle <>
-  fromParaProps'' props
+  fromParaProps' props
 
 pPr :: [Content] -> Content
 pPr = wElem "pPr"
@@ -799,12 +865,27 @@ pPr = wElem "pPr"
 pStyle :: String -> Content
 pStyle = wValElem "pStyle"
 
-fromParaProps'' :: ParaProps -> [Content]
-fromParaProps'' pProps =
-  maybe [] fromSpacing (pPrSpacing pProps) <>
+fromParaProps' :: ParaProps -> [Content]
+fromParaProps' pProps =
+  maybe [] fromNumPr (pPrNumPr pProps) <>
   fromTabs (pPrTabs pProps) <>
-  maybe [] (pure . jc) (pPrJc pProps) <>
-  maybe [] (pure . ind) (pPrInd pProps)
+  maybe [] fromSpacing (pPrSpacing pProps) <>
+  maybe [] (pure . ind) (pPrInd pProps) <>
+  maybe [] (pure . jc) (pPrJc pProps)
+
+fromNumPr :: NumProps -> [Content]
+fromNumPr np = pure . numPr $
+  maybe [] (pure . ilvl) (numPrIlvl np) <>
+  maybe [] (pure . numId) (numPrNumId np)
+
+numPr :: [Content] -> Content
+numPr = wElem "numPr"
+
+ilvl :: Int -> Content
+ilvl = wValElem "ilvl"
+
+numId :: Int -> Content
+numId = wValElem "numId"
 
 fromSpacing :: Spacing -> [Content]
 fromSpacing spacing = [ wElem "spacing" sp ]
