@@ -194,11 +194,17 @@ data AbstractNumProps = AbstractNumProps
   } deriving (Eq, Show)
 
 data NumLevel = NumLevel
-  { nlIlvl    :: Int
-  , nlNumFmt  :: Maybe NumberFormat
-  , nlLvlText :: Maybe String
-  , nlPPr     :: Maybe ParaProps
-  , nlRPr     :: Maybe RunProps
+  { nlIlvl           :: Int  -- ^ 0-based index to numbering levels.
+  , nlStart          :: Maybe Int
+  , nlNumFmt         :: Maybe NumberFormat
+  , nlLvlRestart     :: Maybe Int
+  , nlPStyle         :: Maybe String
+  , nlIsLgl          :: Maybe Bool
+  , nlLvlText        :: Maybe String
+  , nlLvlPicBulletId :: Maybe Int
+  , nlLvlJc          :: Maybe Justification
+  , nlPPr            :: Maybe ParaProps
+  , nlRPr            :: Maybe RunProps
   } deriving (Eq, Show)
 
 data Numbering = Numbering NumberingProps [NumLevel]
@@ -342,8 +348,8 @@ data Justification
 data Indentation = Indentation
   { indStart     :: Maybe Twip
   , indEnd       :: Maybe Twip
-  , indHanging   :: Maybe Bool
-  , indFirstLine :: Maybe Bool
+  , indHanging   :: Maybe Twip
+  , indFirstLine :: Maybe Twip
   } deriving (Eq, Show)
 
 -- |Synonym representing tab stops.

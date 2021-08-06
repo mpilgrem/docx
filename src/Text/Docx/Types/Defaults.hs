@@ -13,6 +13,7 @@ module Text.Docx.Types.Defaults
   ( defaultDocProps
   , qtrCmDefaultTabStop
   , defaultNumDefs
+  , defaultNumLevel
   , normalStyle
   , footnoteTextStyle
   , endnoteTextStyle
@@ -24,6 +25,8 @@ module Text.Docx.Types.Defaults
   , defaultPageMargins
   , defaultSectionMarginals
   , defaultParaProps
+  , defaultSpacing
+  , defaultIndentation
   , bold
   , italic
   , calibri
@@ -52,6 +55,24 @@ qtrCmDefaultTabStop props = props
 
 defaultNumDefs :: NumDefs
 defaultNumDefs = NumDefs [] []
+
+defaultNumLevel :: Int -> NumLevel
+defaultNumLevel n
+  | n < 0 = error $ "Index of numbering level must be 0-based (not " <>
+                    show n <> ")."
+  | otherwise = NumLevel
+                  { nlIlvl           = n
+                  , nlStart          = Just 1
+                  , nlNumFmt         = Just Decimal
+                  , nlLvlRestart     = Just 0
+                  , nlPStyle         = Nothing
+                  , nlIsLgl          = Nothing
+                  , nlLvlText        = Just $ "%" <> show (n + 1)
+                  , nlLvlPicBulletId = Nothing
+                  , nlLvlJc          = Nothing
+                  , nlPPr            = Nothing
+                  , nlRPr            = Nothing
+                  }
 
 normalStyle :: (StyleName, Style)
 normalStyle = ("Normal", ParaStyle
@@ -134,7 +155,6 @@ defaultParaProps = ParaProps
   , pPrSpacing = Just defaultSpacing
   , pPrInd     = Nothing
   , pPrJc      = Nothing
-
   }
 
 defaultSpacing :: Spacing
@@ -142,6 +162,14 @@ defaultSpacing = Spacing
   { spacingBefore = Just 0
   , spacingAfter  = Just 0
   , spacingLine   = Just (AtLeast, ptToTwip 14.0)
+  }
+
+defaultIndentation :: Indentation
+defaultIndentation = Indentation
+  { indStart     = Nothing
+  , indEnd       = Nothing
+  , indHanging   = Nothing
+  , indFirstLine = Nothing
   }
 
 defaultTableProps :: TableProps

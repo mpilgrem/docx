@@ -416,6 +416,16 @@ instance Display Bool where
 
   display = show
 
+instance Display Justification where
+
+  display j = case j of
+    Start      -> "start"
+    End        -> "end"
+    Center     -> "center"
+    Both       -> "both"
+    Distribute -> "distribute"
+
+
 attr :: Display a => String -> a -> [Attr]
 attr k v = [Attr (unqual k) (display v)]
 
@@ -440,8 +450,11 @@ wElem n x = Elem $ node (wName n) x
 wValElem :: Display a => String -> a -> Content
 wValElem n v = wElem n (wValAttr v)
 
-wToggleProp :: String -> Maybe Bool -> [Content]
-wToggleProp n mP = case mP of
+wToggleProp :: String -> Toggle -> [Content]
+wToggleProp n (First mP) = wBoolProp n mP
+
+wBoolProp :: String -> Maybe Bool -> [Content]
+wBoolProp n mP = case mP of
   Nothing    -> []
   Just True  -> [ wElem n () ]
   Just False -> [ wValElem n "false" ]
@@ -587,13 +600,37 @@ fromNumLevels = map fromNumLevel
 
 fromNumLevel :: NumLevel -> Content
 fromNumLevel nLvl = lvl (nlIlvl nLvl) $
+  maybe [] (pure . start) (nlStart nLvl) <>
   maybe [] (pure . fromNumberFormat) (nlNumFmt nLvl) <>
-  maybe [] (pure . wValElem "lvlText") (nlLvlText nLvl) <>
-  maybe [] fromParaProps' (nlPPr nLvl) <>
+  maybe [] (pure . lvlRestart) (nlLvlRestart nLvl) <>
+  maybe [] (pure . pStyle) (nlPStyle nLvl) <>
+  isLgl (nlIsLgl nLvl) <>
+  maybe [] (pure . lvlText) (nlLvlText nLvl) <>
+  maybe [] (pure . lvlPicBulletId) (nlLvlPicBulletId nLvl) <>
+  maybe [] (pure . lvlJc) (nlLvlJc nLvl) <>
+  maybe [] (pure . pPr . fromParaProps') (nlPPr nLvl) <>
   maybe [] (pure . fromRunProps Nothing) (nlRPr nLvl)
 
 lvl :: Int -> [Content] -> Content
 lvl n cs = wElem "lvl" (wAttr "ilvl" n, cs)
+
+start :: Int -> Content
+start = wValElem "start"
+
+lvlRestart :: Int -> Content
+lvlRestart = wValElem "lvlRestart"
+
+isLgl :: Maybe Bool -> [Content]
+isLgl = wBoolProp "isLgl"
+
+lvlText :: String -> Content
+lvlText = wValElem "lvlText"
+
+lvlPicBulletId :: Int -> Content
+lvlPicBulletId = wValElem "lvlPicBulletId"
+
+lvlJc :: Justification -> Content
+lvlJc = wValElem "lvlJc"
 
 fromNumberings :: [Numbering] -> [Content]
 fromNumberings = map fromNumbering
@@ -929,14 +966,7 @@ jc :: Justification -> Content
 jc j = wElem "jc" (fromJustification j)
 
 fromJustification :: Justification -> Attr
-fromJustification j = wValAttr j'
- where
-  j' = case j of
-    Start      -> "start"
-    End        -> "end"
-    Center     -> "center"
-    Both       -> "both"
-    Distribute -> "distribute"
+fromJustification = wValAttr
 
 -- |Reference: /ECMA-376-1:2016, Fundamentals and Markup Language Reference
 -- § 17.3.1.12/.
@@ -947,8 +977,8 @@ fromIndentation :: Indentation -> [Attr]
 fromIndentation i =
   maybe [] (wAttr "start") (indStart i) <>
   maybe [] (wAttr "end") (indEnd i) <>
-  maybe [] (pure . wBoolAttr "hanging") (indHanging i) <>
-  maybe [] (pure . wBoolAttr "firstLine") (indFirstLine i)
+  maybe [] (wAttr "hanging") (indHanging i) <>
+  maybe [] (wAttr "firstLine") (indFirstLine i)
 
 --------------------------------------------------------------------------------
 -- Runs
@@ -1010,7 +1040,7 @@ toProp :: (a -> Content) -> (b -> Last a) -> b -> [Content]
 toProp tag getter props = maybe [] (pure . tag) (getLast $ getter props)
 
 toWToggleProp :: String -> (a -> Toggle) -> a -> [Content]
-toWToggleProp n getter props = wToggleProp n (getFirst $ getter props)
+toWToggleProp n getter props = wToggleProp n (getter props)
 
 rPr :: [Content] -> Content
 rPr = wElem "rPr"
@@ -1232,8 +1262,8 @@ tr = wElem "tr"
 
 fromRowProps :: RowProps -> Content
 fromRowProps rProps = trPr $
-  wToggleProp "cantSplit" (trPrCantSplit rProps) <>
-  wToggleProp "tblHeader" (trPrTblHeader rProps)
+  wBoolProp "cantSplit" (trPrCantSplit rProps) <>
+  wBoolProp "tblHeader" (trPrTblHeader rProps)
 
 trPr :: [Content] -> Content
 trPr = wElem "trPr"

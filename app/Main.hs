@@ -5,16 +5,19 @@ import qualified Data.HashMap.Strict as HM (fromList)
 import Data.Maybe (fromJust)
 
 import Text.Docx (AbstractNum (..), AbstractNumProps (..), Block (..),
-  Block' (..), DocProps (..), Docx (..), Marginal (..), MarginalType (..),
-  NumberFormat (..), Numbering (..), NumberingProps (..), NumDefs (..),
-  NumLevel (..), NumProps (..), ParaProps (..), Run (..), Run' (..),
-  RunContent (..), Section (..), SectionProps (..), Spacing (..), Style(..),
-  Styles(..), ptToTwip, writeDocx)
+  Block' (..), DocProps (..), Docx (..), Indentation (..), Marginal (..),
+  MarginalType (..), NumberFormat (..), Numbering (..), NumberingProps (..),
+  NumDefs (..), NumLevel (..), NumProps (..), ParaProps (..), Run (..),
+  Run' (..), RunContent (..), Section (..), SectionProps (..), Spacing (..),
+  Style(..), Styles(..), ptToTwip, writeDocx)
 
-import Text.Docx.Types.Defaults (bold, defaultDocProps, defaultParaProps,
-  defaultSectionMarginals, defaultSectionProps, endnoteReferenceStyle,
-  endnoteTextStyle, footnoteReferenceStyle, footnoteTextStyle, italic,
-  qtrCmDefaultTabStop, normalStyle)
+import Text.Docx.Types.Defaults (bold, defaultDocProps, defaultIndentation,
+  defaultParaProps, defaultNumLevel, defaultSectionMarginals,
+  defaultSectionProps, endnoteReferenceStyle, endnoteTextStyle,
+  footnoteReferenceStyle, footnoteTextStyle, italic, qtrCmDefaultTabStop,
+  normalStyle)
+
+import Text.Docx.Utilities (cmToTwip)
 
 main :: IO ()
 main = writeDocx "example.docx" example
@@ -38,12 +41,13 @@ example = Docx dProps numDefs styles sections
 
     ]
   numLevels =
-    [ NumLevel
-        { nlIlvl = 0
-        , nlNumFmt = Just Decimal
-        , nlLvlText = Just "%1"
-        , nlPPr = Nothing
-        , nlRPr = Nothing
+    [ (defaultNumLevel 0)
+        { nlPPr = Just $ defaultParaProps
+            { pPrInd = Just $ defaultIndentation
+                { indHanging = Just $ cmToTwip 1.5
+                }
+            , pPrSpacing = Nothing
+            }
         }
     ]
   numberings =
