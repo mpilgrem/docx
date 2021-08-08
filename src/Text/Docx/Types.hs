@@ -17,10 +17,12 @@ module Text.Docx.Types
   , DocProps (..)
   , NumberFormat (..)
   , Twip
+  , Emu
   , NumDefs (..)
   , AbstractNum (..)
   , AbstractNumProps (..)
   , NumLevel (..)
+  , LevelSuffix (..)
   , Numbering (..)
   , NumberingProps (..)
   , Styles (..)
@@ -77,6 +79,7 @@ import Data.Array.IArray (Array)
 import Data.Ix (Ix)
 import Data.Word (Word8)
 
+import Codec.Picture (DynamicImage)
 import Data.Colour.RGBSpace (RGB (..))
 import Data.HashMap.Strict (HashMap)
 import Generics.Deriving (Generic)
@@ -94,7 +97,7 @@ data Docx = Docx
     -- ^ Styles that can be referenced in the document's sections.
   , docxSections :: [Section]
     -- ^ The series of sections of the document.
-  } deriving (Eq, Show)
+  } deriving (Eq)
 
 -- |Representation of document properties.
 data DocProps = DocProps
@@ -108,7 +111,7 @@ data DocProps = DocProps
     -- 'SectionProps' field.
   , dPrDefaultTabStop :: Maybe Twip
     -- ^ Spacing of default tab stop locations.
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Representing of automatic numbering formats.
 data NumberFormat
@@ -175,24 +178,29 @@ data NumberFormat
   | UpperLetter
   | UpperRoman
   | VietnameseCounting
-  deriving (Eq, Show)
+  deriving Eq
 
 -- |Synonym representing measurments in twip (20th of a point, 1,440th of an
 -- inch).
 type Twip = Int
 
+-- |Synonym representing measurements in EMUs (English Metric Units) (360,000th
+-- of a centimetre, 914,400th of an inch).
+type Emu = Int
+
 -- |Representation of automatic numbering definitions.
 data NumDefs = NumDefs [AbstractNum] [Numbering]
-             deriving (Eq, Show)
+             deriving Eq
 
 data AbstractNum = AbstractNum AbstractNumProps [NumLevel]
-                 deriving (Eq, Show)
+                 deriving Eq
 
 data AbstractNumProps = AbstractNumProps
   { anPrAbstractNumId :: Int
   , anPrName          :: String
-  } deriving (Eq, Show)
+  } deriving Eq
 
+-- |Representation of numbering levels.
 data NumLevel = NumLevel
   { nlIlvl           :: Int  -- ^ 0-based index to numbering levels.
   , nlStart          :: Maybe Int
@@ -200,20 +208,26 @@ data NumLevel = NumLevel
   , nlLvlRestart     :: Maybe Int
   , nlPStyle         :: Maybe String
   , nlIsLgl          :: Maybe Bool
+  , nlSuff           :: Maybe LevelSuffix
   , nlLvlText        :: Maybe String
-  , nlLvlPicBulletId :: Maybe Int
   , nlLvlJc          :: Maybe Justification
   , nlPPr            :: Maybe ParaProps
   , nlRPr            :: Maybe RunProps
-  } deriving (Eq, Show)
+  } deriving Eq
+
+data LevelSuffix
+  = TabSuffix
+  | SpaceSuffix
+  | NoSuffix
+  deriving Eq
 
 data Numbering = Numbering NumberingProps [NumLevel]
-               deriving (Eq, Show)
+               deriving Eq
 
 data NumberingProps = NumberingProps
   { nPrNumId         :: Int
   , nPrAbstractNumId :: Int
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Representation of Style Definitions parts of an Office Open XML document
 -- in the Wordprocessing category.
@@ -221,7 +235,7 @@ data Styles = Styles
   { stylesPPrDefault :: Maybe ParaProps  -- ^ Default paragraph properties.
   , stylesRPrDefault :: Maybe RunProps   -- ^ Default run properies.
   , stylesStyles     :: HashMap StyleName Style
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Synonym representing style names. Styles are identified by their names,
 -- which must be unique in a particular Office Open XML Wordprocessing document.
@@ -242,11 +256,11 @@ data Style
       , rStyleIsDefault :: Bool
       , rStyleIsQFormat :: Bool
       }
-  deriving (Eq, Show)
+  deriving Eq
 
 -- |Representation of sections.
 data Section = Section SectionProps [Block]
-             deriving (Eq, Show)
+             deriving Eq
 
 -- |Representation of the properties of a section.
 data SectionProps = SectionProps
@@ -255,7 +269,7 @@ data SectionProps = SectionProps
   , sPrMarginals  :: Array (Marginal, MarginalType) [Block']
   , sPrFnPrNumFmt :: Maybe NumberFormat
   , sPrEnPrNumFmt :: Maybe NumberFormat
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Synonym representing page sizes, (width, height).
 type PageSize = (Twip, Twip)
@@ -271,7 +285,7 @@ data PageMargins = PageMargins
   , pmHeader        :: Twip
   , pmFooter        :: Twip
   , pmGutter        :: Twip
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Representation of running marginals.
 data Marginal
@@ -294,7 +308,7 @@ data Block
   = Paragraph (Maybe String) ParaProps [Run]
     -- ^ A paragraph.
   | Table TableProps TableGrid [Row]
-  deriving (Eq, Show)
+  deriving Eq
 
 -- |Representation of block-level markup other than in the main document
 -- (headers, footers, footnotes and endnotes).
@@ -305,7 +319,7 @@ data Block'
   = Paragraph' (Maybe String) ParaProps [Run']
     -- ^ A paragraph.
   | Table' TableProps TableGrid [Row']
-  deriving (Eq, Show)
+  deriving Eq
 
 -- |Representation of a paragraph's properties.
 data ParaProps = ParaProps
@@ -314,26 +328,26 @@ data ParaProps = ParaProps
   , pPrSpacing :: Maybe Spacing
   , pPrInd     :: Maybe Indentation
   , pPrJc      :: Maybe Justification
-  } deriving (Eq, Show)
+  } deriving Eq
 
 data NumProps = NumProps
   { numPrIlvl  :: Maybe Int
   , numPrNumId :: Maybe Int
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Representation of paragraph spacings.
 data Spacing = Spacing
   { spacingBefore :: Maybe Twip
   , spacingAfter  :: Maybe Twip
   , spacingLine   :: Maybe (LineRule, Int)
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Representation of a paragraph line rules.
 data LineRule
   = Auto
   | Exactly
   | AtLeast
-  deriving (Eq, Show)
+  deriving Eq
 
 -- |Representation of a paragraph's justifications and alignments.
 data Justification
@@ -342,7 +356,7 @@ data Justification
   | Center
   | Both
   | Distribute
-  deriving (Eq, Show)
+  deriving Eq
 
 -- |Representation of a paragraph's indentations.
 data Indentation = Indentation
@@ -350,7 +364,7 @@ data Indentation = Indentation
   , indEnd       :: Maybe Twip
   , indHanging   :: Maybe Twip
   , indFirstLine :: Maybe Twip
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Synonym representing tab stops.
 type Tab = (TabStyle, Twip)
@@ -363,20 +377,20 @@ data TabStyle
   | DecimalTab
   | EndTab
   | StartTab
-  deriving (Eq, Show)
+  deriving Eq
 
 -- |Representation of a table's properties.
 data TableProps = TableProps
   { tblPrTblW      :: Maybe Int
   , tblPrTblLayout :: Maybe TableLayout
   , tblPrCellMar   :: Maybe CellMargins
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Representation of a table's layout types.
 data TableLayout
   = AutoLayout
   | FixedLayout
-  deriving (Eq, Show)
+  deriving Eq
 
 -- |Representation of a table row cell's margins.
 data CellMargins = CellMargins
@@ -384,12 +398,12 @@ data CellMargins = CellMargins
   , cmBottom :: Maybe CellMargin
   , cmStart  :: Maybe CellMargin
   , cmEnd    :: Maybe CellMargin
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Representation of cell margins.
 newtype CellMargin = CellMargin
   { tcMarginW :: Int
-  } deriving (Eq, Show)
+  } deriving Eq
 
 -- |Synonym representing a table's grids.
 type TableGrid = [GridCol]
@@ -401,11 +415,11 @@ data Run
   = Run (Maybe StyleName) RunProps [RunContent]
   | Footnote (Maybe StyleName) RunProps [Block']
   | Endnote (Maybe StyleName) RunProps [Block']
-  deriving (Eq, Show)
+  deriving Eq
 
 -- |Representation of runs of text other than in the main document.
 data Run' = Run' (Maybe StyleName) RunProps [RunContent]
-         deriving (Eq, Show)
+         deriving Eq
 
 -- |Representation of a run's properties.
 data RunProps = RunProps
@@ -489,7 +503,8 @@ data RunContent
   | SoftHyphen
   | Symbol String Int
   | Tab
-  deriving (Eq, Show)
+  | Drawing DynamicImage  -- ^ Ignored outside of the main document.
+  deriving Eq
 
 -- |Representation of break types
 data BreakType
@@ -507,10 +522,10 @@ data ClearType
   deriving (Eq, Show)
 
 -- |Representation of table rows in the main document.
-data Row = Row RowProps [Cell] deriving (Eq, Show)
+data Row = Row RowProps [Cell] deriving Eq
 
 -- |Representation of table rows other than in the main document.
-data Row' = Row' RowProps [Cell'] deriving (Eq, Show)
+data Row' = Row' RowProps [Cell'] deriving Eq
 
 -- |Representation of table row properties.
 data RowProps = RowProps
@@ -519,10 +534,10 @@ data RowProps = RowProps
   } deriving (Eq, Show)
 
 -- |Representation of table row cells in the main document.
-data Cell = Cell CellProps [Block] deriving (Eq, Show)
+data Cell = Cell CellProps [Block] deriving Eq
 
 -- |Representation of table row cells other than in the main document.
-data Cell' = Cell' CellProps [Block'] deriving (Eq, Show)
+data Cell' = Cell' CellProps [Block'] deriving Eq
 
 -- |Representation of table cells properties.
 data CellProps = CellProps

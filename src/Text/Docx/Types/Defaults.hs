@@ -67,8 +67,8 @@ defaultNumLevel n
                   , nlLvlRestart     = Just 0
                   , nlPStyle         = Nothing
                   , nlIsLgl          = Nothing
+                  , nlSuff           = Nothing
                   , nlLvlText        = Just $ "%" <> show (n + 1)
-                  , nlLvlPicBulletId = Nothing
                   , nlLvlJc          = Nothing
                   , nlPPr            = Nothing
                   , nlRPr            = Nothing

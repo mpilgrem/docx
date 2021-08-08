@@ -36,7 +36,8 @@ library
       src
   ghc-options: -Wall
   build-depends:
-      array
+      JuicyPixels
+    , array
     , base >=4.7 && <5
     , bytestring
     , colour
@@ -57,7 +58,8 @@ executable docx-example
       app
   ghc-options: -Wall -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      array
+      JuicyPixels
+    , array
     , base >=4.7 && <5
     , bytestring
     , colour

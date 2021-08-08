@@ -23,8 +23,10 @@ import Numeric (showHex)
 
 import Codec.Archive.Zip (Archive, Entry, addEntryToArchive, emptyArchive,
   fromArchive, toEntry)
+import Codec.Picture (DynamicImage (..), Image (..), dynamicMap)
+import Codec.Picture.Saving (imageToPng)
 import Control.Monad.Extra (concatMapM)
-import Control.Monad.State (State, gets, modify, runState)
+import Control.Monad.State (State, evalState, gets, modify, runState)
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.HashMap.Lazy (toList)
 import Data.Time.Clock.System (SystemTime (systemSeconds), getSystemTime)
@@ -40,7 +42,8 @@ import Text.XML.Light
       QName(QName, qName, qPrefix) )
 
 import Text.Docx.Types
-import Text.Docx.Types.Defaults
+import Text.Docx.Types.Defaults (defaultParaProps)
+import Text.Docx.Utilities (pxToEmu)
 
 -- |Create a file from an Office Open XML Wordpressing document.
 writeDocx :: FilePath -> Docx -> IO ()
@@ -60,7 +63,9 @@ data OtherParts = OtherParts
   , opHeaderFooterNo :: Int
   , opHeaders        :: [(Int, [Block'])]
   , opFooters        :: [(Int, [Block'])]
-  } deriving (Eq, Show)
+  , opDrawingNo      :: Int
+  , opDrawings       :: [(Int, DynamicImage)]
+  } deriving Eq
 
 emptyOtherParts :: OtherParts
 emptyOtherParts = OtherParts
@@ -72,6 +77,8 @@ emptyOtherParts = OtherParts
                           -- endnotes and numbering.
   , opHeaders        = []
   , opFooters        = []
+  , opDrawingNo      = 0
+  , opDrawings       = []
   }
 
 -- |Create an archive from an Office Open XML Wordprocessing document, given a
@@ -90,17 +97,21 @@ docx d sysTime = foldl' (flip addEntryToArchive) emptyArchive entries
   hRefCount = length headers
   footers = opFooters otherParts
   fRefCount = length footers
+  drawings = opDrawings otherParts
   entries = map (\f -> f sysTime') (
     [ contentTypesEntry hasNumbering hRefCount fRefCount
                         hasFootnotes hasEndnotes
 
     , relsEntry
     , documentXmlRelsEntry hasNumbering headers footers hasFootnotes hasEndnotes
+                           drawings
     , stylesEntry d
     , settingsEntry (docxProps d) hasFootnotes hasEndnotes
     ] <>
     [ numberingEntry d | hasNumbering ] <>
-    concatMap (uncurry marginalEntries) [ (Header, headers), (Footer, footers) ]) <>
+    imageEntries (opDrawings otherParts) <>
+    concatMap (uncurry marginalEntries) [ (Header, headers), (Footer, footers) ]
+    ) <>
     maybeToList (footnotesEntry (opFootnotes otherParts) sysTime') <>
     maybeToList (endnotesEntry (opEndnotes otherParts) sysTime') <>
     [documentEntry']
@@ -131,13 +142,15 @@ documentXmlRelsEntry :: Bool
                      -> [(Int, [Block'])]
                      -> Bool
                      -> Bool
+                     -> [(Int, DynamicImage)]
                      -> Integer -> Entry
 documentXmlRelsEntry
-  hasNumbering headers footers hasFootnotes hasEndnotes sysTime = toEntry
-    "_rels/document.xml.rels"
-    sysTime
-    (BS.pack $ ppTopElement $
-       documentXmlRels hasNumbering headers footers hasFootnotes hasEndnotes)
+  hasNumbering headers footers hasFootnotes hasEndnotes drawings sysTime =
+    toEntry
+      "_rels/document.xml.rels"
+      sysTime
+      (BS.pack $ ppTopElement $
+         documentXmlRels hasNumbering headers footers hasFootnotes hasEndnotes drawings)
 
 -- |Create the settings.xml entry
 settingsEntry :: DocProps
@@ -162,6 +175,15 @@ stylesEntry d sysTime = toEntry
   "styles.xml"
   sysTime
   (BS.pack $ ppTopElement $ stylesXml $ docxStyles d)
+
+imageEntries :: [(Int, DynamicImage)] -> [Integer -> Entry]
+imageEntries images = snd $ mapAccumL imageEntry 1 images
+ where
+  imageEntry :: Int -> (a, DynamicImage) -> (Int, Integer -> Entry)
+  imageEntry n (_, di) = (n + 1, \st -> toEntry
+    ("media/image" <> show n <> ".png")
+    st
+    (imageToPng di))
 
 -- |Create the document.xml entry. NB Microsoft Word for Microsoft 365 will put
 -- this in folder \word.
@@ -283,6 +305,7 @@ contentTypes hasNumbering hRefCount fRefCount hasFootnotes hasEndnotes =
     [ default' "rels"
                "application/vnd.openxmlformats-package.relationships+xml"
     , default' "xml" "application/xml"
+    , default' "png" "image/png"
     , override "document.xml" "document.main"
     , override "styles.xml" "styles"
     , override "settings.xml" "settings"
@@ -332,17 +355,20 @@ documentXmlRels :: Bool
                 -> [(Int, [Block'])]
                 -> Bool
                 -> Bool
+                -> [(Int, DynamicImage)]
                 -> Element
-documentXmlRels hasNumbering headers footers hasFootnotes hasEndnotes =
-  node (unqual "Relationships") ([relsAttr],
-    [ relationship' 1 "styles"
-    , relationship' 2 "settings"
-    ] <>
-    [ relationship' 3 "footnotes" | hasFootnotes ] <>
-    [ relationship' 4 "endnotes" | hasEndnotes ] <>
-    [ relationship' 5 "numbering" | hasNumbering ] <>
-    fromHeaders headers <>
-    fromFooters footers)
+documentXmlRels
+  hasNumbering headers footers hasFootnotes hasEndnotes drawings =
+    node (unqual "Relationships") ([relsAttr],
+      [ relationship' 1 "styles"
+      , relationship' 2 "settings"
+      ] <>
+      [ relationship' 3 "footnotes" | hasFootnotes ] <>
+      [ relationship' 4 "endnotes" | hasEndnotes ] <>
+      [ relationship' 5 "numbering" | hasNumbering ] <>
+      fromHeaders headers <>
+      fromFooters footers <>
+      fromDrawings drawings)
  where
   relationship' :: Int -> String -> Content
   relationship' n part = relationship
@@ -365,13 +391,24 @@ fromHeader n (relId, _) = (n+1, relationship
 fromFooters :: [(Int, a)] -> [Content]
 fromFooters footers = snd $ mapAccumL fromFooter 0 footers
 
-fromFooter:: Int -> (Int, a) -> (Int, Content)
+fromFooter :: Int -> (Int, a) -> (Int, Content)
 fromFooter n (relId, _) = (n + 1, relationship
   relId'
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
   (runningMarginalXml Footer (n + 1)))
  where
   relId' = "rId" <> show relId
+
+fromDrawings :: [(Int, a)] -> [Content]
+fromDrawings drawings = snd $ mapAccumL fromDrawing' 0 drawings
+
+fromDrawing' :: Int -> (Int, a) -> (Int, Content)
+fromDrawing' n (relId, _) = (n + 1, relationship
+  relId'
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+  ("media/image" <> show (n + 1) <> ".png"))
+ where
+  relId' = "picId" <> show relId
 
 relsAttr :: Attr
 relsAttr = Attr (unqual "xmlns")
@@ -387,6 +424,18 @@ relationship relId relType relTarget =
 wName :: String -> QName
 wName n = (unqual n) {qPrefix = Just "w"}
 
+rName :: String -> QName
+rName n = (unqual n) {qPrefix = Just "r"}
+
+wpName :: String -> QName
+wpName n = (unqual n) {qPrefix = Just "wp"}
+
+picName :: String -> QName
+picName n = (unqual n) {qPrefix = Just "pic"}
+
+aName :: String -> QName
+aName n = (unqual n) {qPrefix = Just "a"}
+
 xmlns :: String -> String -> Attr
 xmlns nsName = Attr (blank_name {qName = nsName, qPrefix = Just "xmlns"})
 
@@ -399,6 +448,21 @@ xmlnsR :: Attr
 xmlnsR =
   xmlns "r"
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+xmlnsWp :: Attr
+xmlnsWp =
+  xmlns "wp"
+        "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+xmlnsPic :: Attr
+xmlnsPic =
+  xmlns "pic"
+        "http://schemas.openxmlformats.org/drawingml/2006/picture"
+
+xmlnsA :: Attr
+xmlnsA =
+  xmlns "a"
+        "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 class Display a where
 
@@ -425,6 +489,12 @@ instance Display Justification where
     Both       -> "both"
     Distribute -> "distribute"
 
+instance Display LevelSuffix where
+
+  display ls = case ls of
+    TabSuffix   -> "tab"
+    SpaceSuffix -> "space"
+    NoSuffix    -> "nothing"
 
 attr :: Display a => String -> a -> [Attr]
 attr k v = [Attr (unqual k) (display v)]
@@ -446,6 +516,15 @@ uElem n x = Elem $ node (unqual n) x
 
 wElem :: Node t => String -> t -> Content
 wElem n x = Elem $ node (wName n) x
+
+wpElem :: Node t => String -> t -> Content
+wpElem n x = Elem $ node (wpName n) x
+
+picElem :: Node t => String -> t -> Content
+picElem n x = Elem $ node (picName n) x
+
+aElem :: Node t => String -> t -> Content
+aElem n x = Elem $ node (aName n) x
 
 wValElem :: Display a => String -> a -> Content
 wValElem n v = wElem n (wValAttr v)
@@ -605,8 +684,8 @@ fromNumLevel nLvl = lvl (nlIlvl nLvl) $
   maybe [] (pure . lvlRestart) (nlLvlRestart nLvl) <>
   maybe [] (pure . pStyle) (nlPStyle nLvl) <>
   isLgl (nlIsLgl nLvl) <>
+  maybe [] (pure . suff) (nlSuff nLvl) <>
   maybe [] (pure . lvlText) (nlLvlText nLvl) <>
-  maybe [] (pure . lvlPicBulletId) (nlLvlPicBulletId nLvl) <>
   maybe [] (pure . lvlJc) (nlLvlJc nLvl) <>
   maybe [] (pure . pPr . fromParaProps') (nlPPr nLvl) <>
   maybe [] (pure . fromRunProps Nothing) (nlRPr nLvl)
@@ -623,11 +702,11 @@ lvlRestart = wValElem "lvlRestart"
 isLgl :: Maybe Bool -> [Content]
 isLgl = wBoolProp "isLgl"
 
+suff :: LevelSuffix -> Content
+suff = wValElem "suff"
+
 lvlText :: String -> Content
 lvlText = wValElem "lvlText"
-
-lvlPicBulletId :: Int -> Content
-lvlPicBulletId = wValElem "lvlPicBulletId"
 
 lvlJc :: Justification -> Content
 lvlJc = wValElem "lvlJc"
@@ -739,7 +818,9 @@ documentXml d = runState (do
   document [body c]) emptyOtherParts
 
 document :: [Content] -> State OtherParts Element
-document cs = pure $ node (wName "document") ([xmlnsW, xmlnsR], cs)
+document cs = pure $ node (wName "document") (xmlnss, cs)
+ where
+  xmlnss = [xmlnsW, xmlnsR, xmlnsPic, xmlnsA, xmlnsWp]
 
 body :: [Content] -> Content
 body = wElem "body"
@@ -988,8 +1069,9 @@ fromRuns :: [Run] -> State OtherParts [Content]
 fromRuns = mapM fromRun
 
 fromRun :: Run -> State OtherParts Content
-fromRun (Run mStyle props rcs) =
-  pure $ r $ fromRunProps mStyle props : map fromRunContent rcs
+fromRun (Run mStyle props rcs) = do
+  cs <- mapM fromRunContent rcs
+  pure $ r $ fromRunProps mStyle props : cs
 fromRun (Footnote mStyle props blocks) = do
   footnoteNo <- gets opFootnoteNo
   footnotes  <- gets opFootnotes
@@ -1010,7 +1092,8 @@ fromRuns' = map fromRun'
 
 fromRun' :: Run' -> Content
 fromRun' (Run' mStyle props rcs) =
-  r $ fromRunProps mStyle props : map fromRunContent rcs
+  let cs = evalState (mapM fromRunContent rcs) emptyOtherParts
+  in  r $ fromRunProps mStyle props : cs
 
 r :: [Content] -> Content
 r = wElem "r"
@@ -1114,13 +1197,14 @@ fromVertAlign va = wValAttr va'
           Subscript   -> "subscript"
           Superscript -> "superscript"
 
-fromRunContent :: RunContent -> Content
-fromRunContent (RunText text) = t text
-fromRunContent (Break bt) = br bt
-fromRunContent NoBreakHyphen = noBreakHyphen
-fromRunContent SoftHyphen = softHyphen
-fromRunContent (Symbol fontName code) = sym fontName code
-fromRunContent Tab = tab'
+fromRunContent :: RunContent -> State OtherParts Content
+fromRunContent (RunText text) = pure $ t text
+fromRunContent (Break bt) = pure $ br bt
+fromRunContent NoBreakHyphen = pure noBreakHyphen
+fromRunContent SoftHyphen = pure softHyphen
+fromRunContent (Symbol fontName code) = pure $ sym fontName code
+fromRunContent Tab = pure tab'
+fromRunContent (Drawing d) = fromDrawing d
 
 footnoteReference :: Maybe StyleName -> RunProps -> Int -> Content
 footnoteReference mStyle props ref =
@@ -1168,6 +1252,102 @@ sym fontName code = wElem "sym" $ wAttr "font" fontName <>
 
 tab' :: Content
 tab' = wElem "tab" ()
+
+fromDrawing :: DynamicImage -> State OtherParts Content
+fromDrawing d = do
+  drawingNo <- gets opDrawingNo
+  drawings  <- gets opDrawings
+  let drawingNo' = drawingNo + 1
+      drawings' = (drawingNo', d) : drawings
+      w = pxToEmu $ dynamicMap imageWidth d
+      h = pxToEmu $ dynamicMap imageHeight d
+  modify (\s -> s {opDrawingNo = drawingNo', opDrawings = drawings'})
+  pure $ drawing
+    [ inline
+        [ extent w h
+        , docPr drawingNo'
+        , graphic
+            [ graphicData
+                [ pic
+                    [ nvPicPr [ cNvPr drawingNo', cNvPicPr, nvPr ]
+                    , blipFill [blip drawingNo']
+                    , spPr
+                        [ xfrm [ off 0 0, ext w h ]
+                        , prstGeom
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
+
+drawing :: [Content] -> Content
+drawing = wElem "drawing"
+
+inline :: [Content] -> Content
+inline = wpElem "inline"
+
+extent :: Int -> Int -> Content
+extent w h = wpElem "extent" [ Attr (unqual "cx") (show w)
+                             , Attr (unqual "cy") (show h)
+                             ]
+
+docPr :: Int -> Content
+docPr n = wpElem "docPr" [ Attr (unqual "id") n'
+                         , Attr (unqual "name") ("image" <> n' <> ".png")
+                         ]
+ where
+  n' = show n
+
+graphic :: [Content] -> Content
+graphic = aElem "graphic"
+
+graphicData :: [Content] -> Content
+graphicData cs = aElem "graphicData" ([Attr (unqual "uri") "http://schemas.openxmlformats.org/drawingml/2006/picture"], cs)
+
+pic :: [Content] -> Content
+pic = picElem "pic"
+
+nvPicPr :: [Content] -> Content
+nvPicPr = picElem "nvPicPr"
+
+cNvPr :: Int -> Content
+cNvPr n = picElem "cNvPr" [ Attr (unqual "id") n'
+                             , Attr (unqual "name") ("image" <> n' <> ".png")
+                             ]
+ where
+  n' = show n
+
+cNvPicPr :: Content
+cNvPicPr = picElem "cNvPicPr" ()
+
+nvPr :: Content
+nvPr = picElem "nvPr" ()
+
+blipFill :: [Content] -> Content
+blipFill = picElem "blipFill"
+
+blip :: Int -> Content
+blip ref = aElem "blip" (Attr (rName "embed") ("picId" <> show ref))
+
+spPr :: [Content] -> Content
+spPr = picElem "spPr"
+
+xfrm :: [Content] -> Content
+xfrm = aElem "xfrm"
+
+off :: Int -> Int -> Content
+off x y = aElem "off" [ Attr (unqual "x") (show x)
+                      , Attr (unqual "y") (show y)
+                      ]
+
+ext :: Int -> Int -> Content
+ext cx cy = aElem "ext" [ Attr (unqual "cx") (show cx)
+                        , Attr (unqual "cy") (show cy)
+                        ]
+
+prstGeom :: Content
+prstGeom = aElem "prstGeom" (Attr (unqual "prst") "rect")
 
 --------------------------------------------------------------------------------
 -- Table blocks

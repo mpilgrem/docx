@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Codec.Picture (DynamicImage, readImage)
 import Data.Array.IArray ((//))
 import qualified Data.HashMap.Strict as HM (fromList)
 import Data.Maybe (fromJust)
@@ -20,10 +21,14 @@ import Text.Docx.Types.Defaults (bold, defaultDocProps, defaultIndentation,
 import Text.Docx.Utilities (cmToTwip)
 
 main :: IO ()
-main = writeDocx "example.docx" example
+main = do
+  result <- readImage "Haskell-Logo.png"
+  case result of
+    Left s -> putStrLn s
+    Right haskellLogo -> writeDocx "example.docx" (example haskellLogo)
 
-example :: Docx
-example = Docx dProps numDefs styles sections
+example :: DynamicImage -> Docx
+example haskellLogo = Docx dProps numDefs styles sections
  where
   dProps = qtrCmDefaultTabStop $ defaultDocProps
             { dPrEnPrNumFmt = Just CardinalText
@@ -116,6 +121,10 @@ example = Docx dProps numDefs styles sections
    , Paragraph (Just "Body Text") (ParaProps np [] Nothing Nothing Nothing)
         [ Run Nothing (bold <> italic)
             [ RunText "This is an example .docx document (bold and italic)." ]
+        ]
+   , Paragraph (Just "Body Text") (ParaProps Nothing [] Nothing Nothing Nothing)
+        [ Run Nothing mempty
+            [ Drawing haskellLogo ]
         ]
     ]
   np = Just $ NumProps (Just 0) (Just 1)

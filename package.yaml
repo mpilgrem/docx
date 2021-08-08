@@ -27,6 +27,7 @@ dependencies:
 - colour
 - extra
 - generic-deriving
+- JuicyPixels
 - mtl
 - time
 - unordered-containers
